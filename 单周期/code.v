@@ -5,7 +5,6 @@
 `define SLT 3'b111
 `define SLL 2'b00
 `define ZERO 8'b0
-//`define ONE 32'hffffffff
 
 module top_module(
 	input  rst,
@@ -54,15 +53,9 @@ module top_module(
 	wire 			RType,IType,JType,REGIMM,Jump_Reg,Mov;
 	wire 			RegDst,Branch,Jump,MemToReg,ALUSrc,RegWrite;
 
-	//ALUop,default Shiftop
 	//Change to define 
 	//======================================================================
 	localparam ONE = 32'hffffffff;
-	/*
-	localparam ADD = 3'b010,
-			   SLT = 3'b111,
-			   SLL = 2'b00;
-	*/
 	//======================================================================
 	//IF
 	//======================================================================
@@ -163,24 +156,25 @@ module top_module(
 					 .wdata(RF_wdata),.rdata1(rdataA),.rdata2(rdataB));
 		
 		//ALU
-		assign A = (Mov)?32'b0:rdataA;
-		assign B = (ALUSrc)?extend_imm:(REGIMM)?32'b0:rdataB;
+		assign A = 	(Mov)?32'b0:rdataA;
+		assign B = 	(ALUSrc)?extend_imm:(REGIMM)?32'b0:rdataB;
 		alu ALU(.A(A),.B(B),
 				.ALUop(ALUop),
 				.Overflow(Overflow),.CarryOut(CarryOut),.Zero(Zero),
 				.Result(ALUresult));
 		
 		//Shifter
-		assign ShiftA = 		(&opcode[3:0])?extend_imm:rdataB;
-		assign ShiftB = 		(&opcode[3:0])?5'd16:(!shamt)?rdataA[4:0]:shamt;
+		assign ShiftA = 	(&opcode[3:0])?extend_imm:rdataB;
+		assign ShiftB = 	(&opcode[3:0])?5'd16:(!shamt)?rdataA[4:0]:shamt;
 		shifter Shift(.A(ShiftA),.B(ShiftB),
 					  .Shiftop(Shiftop),.Result(ShiftResult));
 
 		//PC
 		//此处出现回环
-		assign PCDefault = 		PC + 32'b100;
-		assign PCBranch = 		PC + (extend_imm<<2) + 4;
-		assign PCReg = (rst)?
+		assign PCDefault = 	PC + 32'b100;
+		assign PCBranch = 	PC + (extend_imm<<2) + 4;
+		assign PCReg = 
+		(rst)?
 			32'b0
 		:(Jump)?
 			(JType)?
@@ -200,94 +194,86 @@ module top_module(
 	//======================================================================
 	//MEM
 	//======================================================================
+		wire [`DATA_WIDTH-1:0] 	sh_sb_data;
+		wire [3:0]				sh_sb_strb;
 		assign MemWrite = 		opcode[5]&opcode[3];
 		assign MemRead = 		opcode[5]&(~opcode[3]);
 		assign Address = 		{ALUresult[31:2],2'b0};
+		assign sh_sb_data = 	rdataB<<{ALUresult[1:0],3'b0};
+		//Write_data
 		assign Write_data = 
-		(~opcode[1]&opcode[0])? //sh //FIXME:store 指令要将有效数字放在地址对应的高位或地位
-			rdataB<<{ALUresult[1],4'b0}
-		:(!opcode[1:0])?//sb
-			rdataB<<{ALUresult[1:0],3'b0}
-		:(~opcode[0]&opcode[1])? //swl and swr
+		(~opcode[1])? 								
+			sh_sb_data								//sh and sb
+		:(~opcode[0]&opcode[1])? 					//swl and swr
 			(opcode[2])?
-				//swr
-				rdataB<<{ALUresult[1:0],3'b0}
+				rdataB<<{ALUresult[1:0],3'b0}		//swr
 			:
-				//swl
-				rdataB>>{~ALUresult[1:0],3'b0}
+				rdataB>>{~ALUresult[1:0],3'b0}		//swl
 		:
-			rdataB;
-		//Store
-		//assign Write_strb = 4'b1111;
-		
-		assign Write_strb = (&opcode[1:0])?//sw
-			4'b1111
-		:(~opcode[1]&opcode[0])?//sh
-			4'b0011<<ALUresult[1:0]
-		:(!opcode[1:0])?//sb
-			4'b0001<<ALUresult[1:0]
-		:(~opcode[0]&opcode[1])? //swl and swr
+			rdataB									//sw
+		;
+		//======================================================================
+		//Write_strb
+		assign sh_sb_strb = 	{2'b0,opcode[0],1'b1}<<ALUresult[1:0];
+		assign Write_strb =
+		(~opcode[1])?													//sh and sb
+			sh_sb_strb
+		:(~opcode[0]&opcode[1])? 										//swl and swr
 			(opcode[2])?
-				{1'b1,~(ALUresult[0]|ALUresult[1]),~ALUresult[1],!ALUresult[1:0]}	
+				{1'b1,~(|ALUresult[1:0]),~ALUresult[1],!ALUresult[1:0]}	//swr
 			:
-				{ALUresult[1]&ALUresult[0],ALUresult[1],ALUresult[0]|ALUresult[1],1'b1}
+				{&ALUresult[1:0],ALUresult[1],|ALUresult[1:0],1'b1}		//swl
 		:
-			4'b1111;
+			4'b1111;													//sw
 	//======================================================================
 	//WB
 	//======================================================================
-		//load
-		assign load_data = (&opcode[1:0])?//lw
-			Read_data
-		:(~opcode[1]&opcode[0])?
-			//lh
-			//($signed(Read_data<<5'd16))>>>5'd16
-			(ALUresult[1])?//高位or低位
+		//load data
+		assign load_data = 
+		(&opcode[1:0])?														
+			Read_data														//lw
+		:(~opcode[1]&opcode[0])?											//lh and lhu
+			(ALUresult[1])?													//高位or低位
 				{{16{~opcode[2]&Read_data[31]}},Read_data[31:16]}
 			:
 				{{16{~opcode[2]&Read_data[15]}},Read_data[15:0]}
-		:(!opcode[1:0])?
-			//lb
-			//($signed(Read_data<<5'd16))>>>5'd16
-			(!ALUresult[1:0])?
-				{{24{~opcode[2]&Read_data[7]}},Read_data[7:0]}
-			:(~ALUresult[1]&ALUresult[0])?
-				{{24{~opcode[2]&Read_data[15]}},Read_data[15:8]}
-			:(~ALUresult[0]&ALUresult[1])?
-				{{24{~opcode[2]&Read_data[23]}},Read_data[23:16]}
-			:
-				{{24{~opcode[2]&Read_data[31]}},Read_data[31:24]}
-		:	// lwl and lwr
-			(opcode[2])?
-				(Read_data&mask)>>shiftime | (rdataB&(~(mask>>shiftime)))
-			:
-				((Read_data&mask)<<shiftime) | (rdataB&(~(mask<<shiftime)))
+		:(!opcode[1:0])?													//lb and lbu
+			(!ALUresult[1:0])?												
+				{{24{~opcode[2]&Read_data[7]}},Read_data[7:0]}				//00
+			:(~ALUresult[1]&ALUresult[0])?									
+				{{24{~opcode[2]&Read_data[15]}},Read_data[15:8]}			//01
+			:(~ALUresult[0]&ALUresult[1])?									
+				{{24{~opcode[2]&Read_data[23]}},Read_data[23:16]}			//10
+			:																
+				{{24{~opcode[2]&Read_data[31]}},Read_data[31:24]}			//11
+		:																	// lwl and lwr
+			(opcode[2])?													
+				(Read_data&mask)>>shiftime | (rdataB&(~(mask>>shiftime)))	//lwr
+			:																
+				(Read_data&mask)<<shiftime | (rdataB&(~(mask<<shiftime)))	//lwl
 		;
+		//======================================================================
 		//load mask
+		// opcode[2] 指示lwl和lwr
 		assign shiftime = {{2{~opcode[2]}}^ALUresult[1:0],3'b0};
-		assign mask = //(32'hffffffff<<(shiftime))>>(shiftime);
-			(opcode[2])?
-				//lwr
-				32'hffffffff<<(shiftime)//>>(shiftime)
-			:
-				//lwl
-				(32'hffffffff<<(shiftime))>>(shiftime)
-			;
+		assign mask = (ONE<<shiftime)>>(shiftime&{32{~opcode[2]}});
+		//======================================================================
 		//Register write
+		wire   shift_lui;	
+		assign RF_wen   = 	RegWrite&(~Mov|(Zero^func[0]));
 		assign RF_waddr = 	(Jump_Reg)?5'd31:(RegDst)?rd:rt;
+		assign shift_lui=	RType&(!func[5:3])|(&opcode[3:0]);
 		assign RF_wdata = 	(MemToReg)?
-			load_data
-		:(RType&(!func[5:3])|(&opcode[3:0]))?
-			ShiftResult
+			load_data		//从Mem取数
+		:(shift_lui)?
+			ShiftResult		//移位操作
 		:(Jump_Reg)?
-			(PC+8)
+			(PC+8)			//jal,jalr
 		:(Mov)?
-			rdataA
+			rdataA			//movn,movz
 		:
-			ALUresult;//TODO:把PC+4和PC+8的操作整合到用ALU实现
-		
-		assign RF_wen   = 		RegWrite&(~Mov|(Zero^func[0]));
-
+			ALUresult		//default
+		;
 endmodule
 
 
@@ -308,12 +294,7 @@ module reg_file(
 	integer i;
 	always @(posedge clk or posedge rst) begin
 		regM[0]=32'b0;
-		/*if(rst) begin
-			for(i=0;i<6'd32;i=i+1)begin
-				regM[i]=32'b0;
-			end
-		end
-		else*/ if(wen && waddr!=5'b0) begin
+		if(wen && waddr!=5'b0) begin
 			regM[waddr]<=wdata;
 		end
 	end
