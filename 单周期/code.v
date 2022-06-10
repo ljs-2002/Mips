@@ -91,26 +91,26 @@ module top_module(
 		//ALUop
 		assign ALUop = (RType)?										//R-Type
 			(func[5])?												//运算指令
-				(func[3:2]==2'b00)?{func[1],2'b10}:
-				(func[3:2]==2'b10)?{~func[0],2'b11}:
-				(func[3:2]==2'b01)?{func[1],1'b0,func[0]}:
-				`ADD
+				{
+					func[1]^(func[3]&func[0]),
+					~func[2],
+					func[3]|func[2]&func[0]
+				}
 			:
 				`ADD
 		:(IType)?													//I-Type
 			(opcode[5:3]==4'b001)?									//运算指令
-				(opcode[2:1]==2'b00)?{opcode[1],2'b10}:
-				(opcode[2:1]==2'b01)?{~opcode[0],2'b11}:
-				(opcode[2]==1'b1)?{opcode[1],1'b0,opcode[0]}:
-				`ADD
+				{
+					opcode[1]&(opcode[2]|(~opcode[0])),
+					~opcode[2],
+					~opcode[2]&opcode[1]|opcode[2]&opcode[0]
+				}
 			:(opcode[5:2]==4'b0001)?								//分支指令
 				{2'b11,opcode[1]}
-			:(opcode[5]==1'b1)?										//读写指令
-				`ADD
 			:
-				`ADD												//aluop default
-		:(REGIMM)?													//REGIMM
-			`SLT
+				`ADD												//读写指令及其他
+		:(REGIMM)?													
+			`SLT													//REGIMM
 		:`ADD;														//J-Type,aluop default
 
 		//Shiftop
