@@ -229,28 +229,23 @@ module top_module(
 	//WB
 	//======================================================================
 		//load data
-		assign load_data = 
-		(&opcode[1:0])?														
-			Read_data														//lw
-		:(~opcode[1]&opcode[0])?											//lh and lhu
-			(ALUresult[1])?													//高位or低位
-				{{16{~opcode[2]&Read_data[31]}},Read_data[31:16]}
-			:
-				{{16{~opcode[2]&Read_data[15]}},Read_data[15:0]}
-		:(!opcode[1:0])?													//lb and lbu
-			(!ALUresult[1:0])?												
-				{{24{~opcode[2]&Read_data[7]}},Read_data[7:0]}				//00
-			:(~ALUresult[1]&ALUresult[0])?									
-				{{24{~opcode[2]&Read_data[15]}},Read_data[15:8]}			//01
-			:(~ALUresult[0]&ALUresult[1])?									
-				{{24{~opcode[2]&Read_data[23]}},Read_data[23:16]}			//10
-			:																
-				{{24{~opcode[2]&Read_data[31]}},Read_data[31:24]}			//11
-		:																	// lwl and lwr
-			(opcode[2])?													
+		wire [4:0] 	lhb_lshift,lhb_rshift;
+		wire [31:0] sign,lRead_data;
+		assign lhb_lshift = {~ALUresult[1],~(opcode[0]|ALUresult[0]),3'b0};
+		assign lhb_rshift = {1'b1,~opcode[0],3'b0};
+		assign lRead_data = Read_data<<lhb_lshift;
+		assign sign       = {{16{~opcode[2]}},{8{~(opcode[0]|opcode[2])}},8'h00}
+							&{32{lRead_data[31]}};
+		assign load_data  = 
+		(opcode[1])?
+			(opcode[0])?
+				Read_data													//lw
+			:(opcode[2])?													
 				(Read_data&mask)>>shiftime | (rdataB&(~(mask>>shiftime)))	//lwr
 			:																
 				(Read_data&mask)<<shiftime | (rdataB&(~(mask<<shiftime)))	//lwl
+		:
+			((lRead_data)>>lhb_rshift)|sign			//lh,lhu,lb,lbu
 		;
 		//======================================================================
 		//load mask
